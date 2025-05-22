@@ -63,7 +63,8 @@ However, if the string starts with 'E', it will be processed by the function `su
 
 Finally, the part before the '|' delimiter is used to calculate a hash value. This hash is then used for comparisons with different cases later in the program and for subsequent processing (I will show this later)
 
-```c
+<div class="max-h-96 overflow-auto">
+  ```c
   v1 = -1LL;
   v3 = -1LL;
   do
@@ -123,8 +124,9 @@ Finally, the part before the '|' delimiter is used to calculate a hash value. Th
     v16 = *v10++;
     v13 = v16 + __ROR4__(v13, 13);
     --v15;
-  }
-```
+    ```
+</div>
+
 
 ### Case 1:
 
@@ -149,6 +151,8 @@ Therefore, 'ENCRYPTTRAFFIK07' will likely be the string used by `sub_7FF664D219F
 ### Processing sending command
 
 After decrypting the Base64 commands sent by the server once, it can be seen that they all start with the letter 'E'. Therefore, we will analyze the function that processes this data
+
+<div class="max-h-96 overflow-auto">
 
 ```c
 void *__fastcall sub_7FF664D219F0(__int64 a1, unsigned int a2)
@@ -314,6 +318,7 @@ void *__fastcall sub_7FF664D219F0(__int64 a1, unsigned int a2)
   return v8;
 }
 ```
+</div>
 
 From the code above, I can just using AppCall to call this function and create decrypt these encrypted strings
 
@@ -357,7 +362,8 @@ print(f"v13 = {v13} (hex: {hex(v13)})")
 ![alt text](/blog/img/capture-point/image-10.png)
 
 - Code of sub_7FF664D22890
-    
+<div class="max-h-96 overflow-auto">
+
     ```python
     int __fastcall sub_7FF664D22890(LPCWSTR lpszUrl, _WORD *Src, int a3)
     {
@@ -558,6 +564,7 @@ print(f"v13 = {v13} (hex: {hex(v13)})")
       return (int)v9;
     }
     ```
+</div>
     
 
 Okay, so the string 'http://192.168.138.67:8080/data.png|DEKRYPT|0' is analyzed by the program into three parts: a path to download a file, a parameter string (here it's 'DEKRYPT'), and a control flag. After downloading the content from the URL, the program will decode the Base64 and write it to a temp file
