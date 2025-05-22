@@ -1,0 +1,148 @@
+---
+title: '[WRITE UP] - Wolv CTF 2025'
+description: ''
+date: '2025-03-13'
+tags: ['2025', 'Reverse']
+authors: ['tdeit']
+draft: false
+---
+# Chall
+
+> Given file:
+> 
+
+## Flow of the program
+
+### 1. Load the necessary APIs (GetProcAddress)
+
+```c
+ModuleHandleA = GetModuleHandleA("kernel32.dll");
+OpenProcess = GetProcAddress(...);
+VirtualProtectEx = GetProcAddress(...);
+```
+
+### **2. Check debugger**
+
+```c
+if (IsDebuggerPresent()) {
+    puts("Nice try");
+    exit(-1);
+}
+```
+
+### 3. Open a handle to its own process
+
+```c
+GetCurrentProcessId() → OpenProcess(...);
+```
+
+### 4. Allocate a memory and write shellcode into it
+
+```c
+VirtualAllocEx(... 139 bytes ...) → v16;
+```
+
+Allocate a memory within the process itself (VirtualAllocEx).
+
+After that:
+
+```c
+for (int i = 0; i < 139; ++i)
+    unk_140005080[i] ^= rand();  // decrypt shellcode
+```
+
+### 5. Inject the decrypted shellcode into the new memory
+
+```c
+WriteProcessMemory(... v16, &unk_140005080, 139 ...)
+```
+
+### 6. Mark that memory region as executable
+
+```c
+VirtualProtectEx(..., PAGE_EXECUTE_READ
+```
+
+### 7. Check debugger again
+
+```c
+CheckRemoteDebuggerPresent → if (v24) exit;
+```
+
+### 8. Read input from **user**
+
+```c
+fgets(Buffer, 19, stdin);
+Buffer[strcspn(Buffer, "\n")] = 0;
+```
+
+### 9.  Call shellcode like a function
+
+```c
+v22 = v16(Buffer);  // gọi shellcode đã inject
+```
+
+### 10. Print result
+
+```c
+if (v22)
+    puts("What? no...");
+else
+    puts("CORRECT!");
+```
+
+## My analysis and my method so solve this problem
+
+So, this program is using some APIs for allocate and then decrypt shellcode and self-inject it into itself to use that shellcode later for checking user input.
+
+Therefore, my approach is simply to set breakpoints at key points. We noticed `VirtualProtectEx`, so I'll set a breakpoint there to see which memory region it's pointing to and dump that memory region because the memory will be allocated beforehand.
+
+### Step 1: Set a breakpoint here to change the flag to 0 in order to bypass IsDebuggerPresent
+
+![alt text](/blog/img/Wolv-2025/image.png)
+
+### Step 2: Set a breakpoint at the memory region you identified earlier (likely the one made executable via `VirtualProtectEx`) to dump the decrypted and injected shellcode
+
+![alt text](/blog/img/Wolv-2025/image-1.png)
+
+
+### Step 3:  Dump the register containing the shellcode
+
+![alt text](/blog/img/Wolv-2025/image-2.png)
+
+### Step 4: Put that shellcode into IDA
+
+![alt text](/blog/img/Wolv-2025/image-3.png)
+
+### Step 5: Decrypt it
+
+```python
+def solve():
+    # Length of the string to be decoded
+    length = 18
+
+    # Encoded values
+    v7 = (
+        0x90F2D1D01150F11.to_bytes(8, 'little') +
+        0x1352353903521556.to_bytes(8, 'little') +
+        (4441).to_bytes(2, 'little')
+    )
+
+    # Key used for XOR
+    v8 = (1734437990).to_bytes(4, 'little')  
+
+    # Decode each byte using XOR
+    result = bytearray()
+    for i in range(length):
+        result.append(v7[i] ^ v8[i % 4])
+
+    return result.decode('ascii')
+
+if __name__ == "__main__":
+    print("flag:", solve())
+
+```
+
+## FLAG
+
+`wctf{Ann0y3d_Y3t?}`
