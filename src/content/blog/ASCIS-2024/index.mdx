@@ -1,0 +1,279 @@
+---
+title: '[WRITE UP] - ASCIS Final 2024'
+description: ''
+date: '2025-03-13'
+tags: ['2025', 'ReverseReverse', 'WriteUp']
+authors: ['tdeit']
+draft: false
+---
+
+# TRUST Me!
+
+## Overview
+
+I wasn't qualified for the ASCIS 2024 finals, but after the competition ended, I managed to get the challenge and solve it. 
+
+## Challenge Information
+
+> Given file:
+> 
+
+![alt text](/public/blog/img/ASCIS/image.png)
+
+
+### Overview:
+
+After extracted the rar file, we given 2 file are: `TrustMe.exe` and `record.pcapng` 
+
+## My approach to understand the flow of TrustMe.exe
+
+### Checking file pcapng
+
+First off, I opened the pcapng file to check and gather some information.
+
+After checking, I only know there's communication between two IPs where `192.168.89.136` sent the string `I'm_4_Gat3_K33per` to `192.168.89.1`.
+
+
+![alt text](/public/blog/img/ASCIS/image-1.png)
+
+Next, I will examine the `exe` file.
+
+### Analyze EXE file
+
+I used `die` to detect its language so I could use the appropriate tools.
+
+From there, I know it is writen by `C++`, and I would use `IDA Pro` for my static analysis.
+
+![alt text](/public/blog/img/ASCIS/image-2.png)
+
+> *Usually, I wouldn't start with the `entry point` first. Instead, I begin by using CAPA to detect some behaviors and then analyze from a function that I found interesting. After that, I trace back to see which functions call these interesting functions, gradually working my way back to the `main` function*
+> 
+
+Regarding this challenge, since I already know there's communication between two IPs from checking the `pcapng` file earlier, I'll try looking in the `Strings` section of IDA to see if there's any related information about those IPs or something interesting.
+
+Luckily, the IP is hardcoded and not encrypted then resolved at runtime
+
+![alt text](/public/blog/img/ASCIS/image-3.png)
+
+The function that calls these IPs seems like it will handle the connection and communication, so I would start my analysis there first
+
+![alt text](/public/blog/img/ASCIS/image-4.png)
+
+> *To make analysis easier and understand the program's flow, I usually try to understand and rename the functions called within that function first.*
+> 
+
+I will show you some function I renamed and explain it:
+
+1. *do_something_with_BMP_header*
+
+This function is called early on in the function we're analyzing, but for some reason IDA couldn't generate pseudocode. So, I had to read the assembly and discovered that `42 4D` is the header for a BMP file
+
+![alt text](/public/blog/img/ASCIS/image-5.png)
+
+1. *call_winsocket*
+
+This function handles the initialization of win socket for network communications by loading the required DLL
+
+![alt text](/public/blog/img/ASCIS/image-6.png)
+
+1. *generate_string_64_bytes*
+
+This function generates a 64-character by using `rand` (time based)
+
+![alt text](/public/blog/img/ASCIS/image-7.png)
+
+1. *RC4*
+
+This function is the RC4 algorithm; I'm very familiar with this algorithm because I've encountered it a lot in CTFs
+
+![alt text](/public/blog/img/ASCIS/image-8.png)
+
+1. *RC4_and_send_to_server*
+
+This function RC4 and then send it to the server I think, because it call `call_winsocket` 
+
+![alt text](/public/blog/img/ASCIS/image-9.png)
+
+1. *handle_DLL*
+
+This function seems to be allocating memory to load a DLL because it has `VirtualAlloc` and there's an exception handling function below it that prints an error message
+
+![alt text](/public/blog/img/ASCIS/image-10.png)
+
+![alt text](/public/blog/img/ASCIS/image-11.png)
+
+1. *use_func_from_DLL*
+
+This function appears to receive the data and process it according to different cases. That's my guess because when using a DLL, the exported functions are typically indexed starting from zero upwards. When calling them, you can either use their ordinal number or their name.
+
+![alt text](/public/blog/img/ASCIS/image-12.png)
+
+> For every instance where I confirmed receiving or sending data, I double-checked with the `pcapng` file to ensure I wasn't mistaken. In reality, I'm not entirely sure when the `call_winsocket` function handles receiving and when it handles sending
+> 
+
+## Flow of the program
+
+### Step 1:
+
+I know that, the server sent the strings `I'm_4_Gat3_K33per` to the program.
+
+So, I've posed a big question to myself: ***What will the program do with this data?***
+
+The code below answers that question: the program will receive data, then use `generate_string_64_bytes` to create a new string, and finally RC4 encrypt the length of the string and that string (by the key is received string) before sending it to the server.
+
+![alt text](/public/blog/img/ASCIS/image-13.png)
+
+### Step 2:
+
+Next, the program calls `call_winsocket` to receive data twice from the server (I've compared this with the `pcapng` file to confirm) and uses RC4 to decrypt it by the key is the 64-character generated earlier.
+After that, the decrypted data is allocated by the `handle_DLL` function
+
+![alt text](/public/blog/img/ASCIS/image-14.png)
+
+### Step 3:
+
+with the functions I've renamed, I can understand that the program will process the bytes of the BMP image file, then reuse the same 64-character string generated earlier to RC4-encrypt 4 bytes and send them to the server, after which it calls the `use_func_from_DLL` function to utilize it
+
+![alt text](/public/blog/img/ASCIS/image-15.png)
+
+### Step 4:
+
+Finally, I'll dig deeper into the `use_func_from_DLL` function to clarify things further. As we've know its purpose earlier, this function will receive data from the server and process it based on different cases, and within it, each case will have its own function to handle the specific processing
+
+![alt text](/public/blog/img/ASCIS/image-16.png)
+
+These functions all have the exact same functionality, differing only in the `gen0-4` components. That are functions extracted from the DLL, I can confirmed that because i decrypted it during this analyze.
+
+So,  it's likely that this function took functionality from the DLL's functions, then uses them to generate new string (by 64-character strings created earlier), which is RC4-encrypt and sent to the server.
+
+![alt text](/public/blog/img/ASCIS/image-17.png)
+
+## The way to solving this challenge
+
+### Step 1: Find the key to decrypt DLL
+
+I used the string sent by the server to decrypt the data and found that the 64-character string is indeed the key to decrypt the DLL (the other string was what the program sent to the server, after removing the first 4 bytes representing the string's length
+
+`WTPjWbJafqNPqrZFswaijmyVKMddOrKzukegbVDpXJqDfulPDmDwDasqTwxvibnM`
+
+![alt text](/public/blog/img/ASCIS/image-18.png)
+
+### Step 2: Decrypt DLL is encrypted and see the export function
+
+Now that I have the key, I can simply use CyberChef to decrypt it 
+
+![alt text](/public/blog/img/ASCIS/image-19.png)
+
+Using `PE-Bear`, I can see that we're on the right track. The original name of the DLL is visible as `dll_svattt2024`, and the exported functions are indeed `gen0-4`
+
+![alt text](/public/blog/img/ASCIS/image-20.png)
+
+Now, all that's left is to use `IDA Pro` to open it up and see what the functionality of these functions is
+`gen0`
+
+![alt text](/public/blog/img/ASCIS/image-21.png)
+
+`gen1` 
+
+![alt text](/public/blog/img/ASCIS/image-22.png)
+
+`gen2` 
+
+![alt text](/public/blog/img/ASCIS/image-23.png)
+
+`gen3` 
+
+![alt text](/public/blog/img/ASCIS/image-24.png)
+
+From here, I've figured out the functionality of the `gen` functions. After reusing these functions to generate new strings from the 64-character string, here are the corresponding strings:
+
+gen0: `MnbivxwTqsaDwDmDPlufDqJXpDVbgekuzKrOddMKVymjiawsFZrqPNqfaJbWjPTW`
+
+gen1: `wtpJwBjAFQnpQRzfSWAIJMYvkmdDoRkZUKEGBvdPxjQdFULpdMdWdASQtWXVIBNm` 
+
+gen2: `MWTPjWbJafqNPqrZFswaijmyVKMddOrKzukegbVDpXJqDfulPDmDwDasqTwxvibn` 
+
+gen3: `JGCwJoWnsdACdeMSfjnvwzlIXZqqBeXmhxrtoIQcKWdQshyCQzQjQnfdGjkivoaZ` 
+
+### Step 3: Processing data and decrypting
+
+Looking at the `pcapng` file, I can see that the server sends a command which is the index corresponding to a function in the DLL. Then, the program sends 4 bytes representing the length, followed by the encrypted data itself
+
+![alt text](/public/blog/img/ASCIS/image-25.png)
+
+To get the correct order, I'll first take the command sent by the server by filtering `tcp.len == 1`. This gives me the encryption order
+
+![alt text](/public/blog/img/ASCIS/image-26.png)
+
+`02, 01, 01, 02, 03, 02, 03, 01, 02, 03, 01, 00, 02, 03, 00, 00, 02, 01, 01, 00, 00  03` 
+
+The next thing to resolve is the length. To decrypt correctly, I'll also extract the lengths in the same order as the server's commands above by filtering `tcp.len == 4` 
+
+`70d30396, 67fca9df, 67fca9df, 70d30396, e0dced60, 70d30396, e0dced60, 67fca9df, 70d30396, e0dced60, ... last packet: 54a3e360`
+
+After manually examining the lengths of the sent encrypted data, I noticed that the packets are evenly divided, and only the last packet has a different length.
+
+So from there, I just pasted all data of `pcapng` to VSC, then copy the encrypted data and checking its character length
+
+![alt text](/public/blog/img/ASCIS/image-27.png)
+
+Length of it is: `2098586`
+
+From there, I'm going to write a Python script to separate this data into different files by removing the first 6 bytes and taking 2098586 character
+
+For some reason, I have to **increase to 2098590 for the correct data**
+
+```python
+import sys
+
+file_path, *opt = sys.argv[1:]
+skip, take, prefix = (opt + ['12', '2098590', ''])[:3]
+skip, take = int(skip), int(take)
+
+with open(file_path, 'rb') as src:
+    idx = 0
+    while src.read(skip):                 # skip 6 bytes
+        chunk = src.read(take)            # take data
+        if not chunk:
+            break
+        with open(f"{prefix}{idx}", 'wb') as out:
+            out.write(chunk)              #  print file
+        idx += 1
+```
+
+Because my data processing wasn't perfectly clean, the first line of the data files is empty. 
+
+Below is my decryption script:
+
+```python
+from Crypto.Cipher import ARC4
+
+idx = [2,1,1,2,3,2,3,1,2,3,1,0,2,3,0,0,2,1,1,0,0,3]
+keys = [
+    b"MnbivxwTqsaDwDmDPlufDqJXpDVbgekuzKrOddMKVymjiawsFZrqPNqfaJbWjPTW",
+    b"wtpJwBjAFQnpQRzfSWAIJMYvkmDDoRkZUKEGBvdPxjQdFULpdMdWdASQtWXVIBNm",
+    b"MWTPjWbJafqNPqrZFswaijmyVKMddOrKzukegbVDpXJqDfulPDmDwDasqTwxvibn",
+    b"JGCwJoWnsdACdeMSfjnvwzlIXZqqBeXmhxrtoIQcKWdQshyCQzQjQnfdGjkivoaZ"
+]
+
+out = bytearray()
+for i, k in enumerate(idx):
+    data = open(str(i), 'rb').read()          # read file 0..21
+    data = data.split(b'\n', 1)[1] if b'\n' in data else data   # skip first line
+    for b in (b' ', b'\t', b'\r', b'\n'):     # skip null bytes
+        data = data.replace(b, b'')
+    try:
+        data = bytes.fromhex(data.decode())   # ASCII-hex → bytes
+    except Exception:
+        pass                                      
+        out += ARC4.new(keys[k]).decrypt(data)    # decrypt
+
+open('flag.txt', 'w').write(out.hex())        # extract hex to flag.txt
+```
+
+## FLAG
+<p>
+  ASCIS{'{'}TruSt_m3_br0!_I_d1dn_T_D0_4nyTh1ng!_I_sw34r{'}'}
+</p>
+
+![alt text](/public/blog/img/ASCIS/image-28.png)

@@ -2,11 +2,7 @@
 import Breadcrumbs from '@/components/Breadcrumbs.astro'
 import Link from '@/components/Link.astro'
 import PageHead from '@/components/PageHead.astro'
-import ProjectCard from '@/components/ProjectCard.astro'
 import Layout from '@/layouts/Layout.astro'
-import { getAllProjects } from '@/lib/data-utils'
-
-const projects = await getAllProjects()
 ---
 
 <Layout>
@@ -16,39 +12,27 @@ const projects = await getAllProjects()
   <section>
     <div class="min-w-full">
       <div class="prose mb-8">
-        <p class="mb-4">
-          astro-erudite is an opinionated, unstyled static blogging template
-          that prioritizes simplicity and performance, built with <Link
-            href="https://astro.build"
-            class="text-foreground"
-            external
-            underline>Astro</Link
-          >, <Link
-            href="https://tailwindcss.com"
-            class="text-foreground"
-            external
-            underline>Tailwind</Link
-          >, and <Link
-            href="https://ui.shadcn.com"
-            class="text-foreground"
-            external
-            underline>shadcn/ui</Link
-          >. It provides a clean foundation for your content while being
-          extremely easy to customize.
-        </p>
+        <h2>Introduction</h2>
         <p>
-          To learn more about the philosophy behind this template, check out the
-          following blog post: <Link
-            href="/blog/the-state-of-static-blogs"
+          Hi, I'm Deit aka tdeit. I’m currently learning Reverse Engineering, with a growing interest in Digital Forensics and Cryptography.
+          I also play CTFs with <Link
+            href="https://ctftime.org/team/378289"
             class="text-foreground"
-            underline>The State of Static Blogs in 2024</Link
-          >.
+            underline
+            external
+          >Fate//Decide</Link> – a team of students from different universities.
         </p>
-      </div>
 
-      <h2 class="mb-4 text-2xl font-medium">Example Projects Listing</h2>
-      <div class="flex flex-col gap-4">
-        {projects.map((project) => <ProjectCard project={project} />)}
+        <h2>Information</h2>
+        <ul>
+          <li><strong>Fullname:</strong> Trần Hữu Thành Đạt</li>
+          <li><strong>Discord:</strong> tdeit</li>
+        </ul>
+
+        <h2>Achievements</h2>
+        <ul>
+          <li>🥇 1st Prize - EHCTF 2025</li>
+        </ul>
       </div>
     </div>
   </section>
